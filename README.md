@@ -77,7 +77,6 @@ The example demonstrates:
 3. **Creating a Simple Sender**: `auto sender = just(42);`
 4. **Building a Chain of Operations**:
    - `then()` - Transform values
-   - `on()` - Schedule work on a specific scheduler
 5. **Waiting for Completion**: `sync_wait()`
 
 ### Expected Output
@@ -100,7 +99,7 @@ The thread IDs will vary, but you'll see that different stages of the pipeline r
 - **Senders**: Objects that can send values (e.g., `just(42)`)
 - **Receivers**: Objects that can receive values and handle completion
 - **Schedulers**: Objects that determine where and when work executes
-- **Algorithms**: Functions that transform senders (e.g., `then`, `on`)
+- **Algorithms**: Functions that transform senders (e.g., `then`)
 - **Thread Pools**: Execution contexts for concurrent work
 
 ## Modern C++ Practices Used
