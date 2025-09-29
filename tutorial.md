@@ -34,22 +34,85 @@ The developer describes their work using senders in `std::execution`. A sender, 
 
 When a developer wants to leverage an asynchronous framework to do work they usually want to produce a value--where a value can be a trivial or complex type/data structure. Upon errors or exceptions, the sender can produce an error or if its execution is stopped it may produce a value indicating it was stopped. Therefore, a sender's work completion is described by setting the receivers:
 
-1. value,
-2. error, or
-3. stopped upon cancellation
+1. Value,
+2. Error, or
+3. Stopped upon cancellation
 
 The developer produces senders by using the algorithms included in the excecution control library. These algorithms fall into three categories:
 
-1. sender factories: produce a sender
-2. sender adapters: take a sender, and produce a sender
-3. sender consumers: consume a sender and do not produce a sender
+1. Sender factories: produce a sender
+2. Sender adapters: take a sender, and produce a sender
+3. Sender consumers: consume a sender and do not produce a sender
 
-I will explain these three categories in depth later in this article. 
+I will explain these three categories in depth later in this article. What the developer should know about these three categories of algorithms, is that they may be composed to create senders. The execution control library provides the `|` operator as the syntax to compose these algorithms and create senders. 
+
+## Receivers
+
+> A receiver is a callback that supports more than one channel. In fact, it supports three of them: `set_value`, `set_error`, and `set_stopped`. [...] Receivers are not a part of the end-user-facing API of this proposal; they are necessary to allow unrelated senders communicate with each other, but the only users who will interact with receivers directly are authors of senders.
+
+So, developers need not worry about directly dealing with receivers, that's one less thing to worry about! All the developer needs to know about receivers is that they are the background mechanism that allows their value(s), error(s), or stopped state produced by senders to be received and used. A receiver is essentuially an object that holds the results of a sender's execution. When a developer executes their sender using a scheduler, the sender is connected to the receiver and the value(s), error(s), or stopped state is received. This will become clear in our examples.
+
+## Putting Schedulers, Senders, and Receivers all Together
+
+In summary, schedulers, senders, and receivers are the three primary concepts that describe the execution control library programming paradigm. In this article, I draw a distinction between a user (developer) and an implementer of `std::execution`. The developer uses schedulers, senders, and receivers (indirectly) to do work on execution resources whereas an implementer develops custom schedulers, senders, algorithms, and receivers directly.
+
+In reality, a developer only needs to use a scheduler and algorithms to leverage the basic features of `stdexecution`, let's consider a common use case.
+
+In C++23 the most straightforward way to manage work using different execution resources is for a developer to create and own something like a `std::jthread` and pass a `std::function` to that thread. In this example, there is no explicit scheduler used by the developer and the function defines the work, not a sender. P2300R10 changes this paradigm. 
+
+If we adopt the `std::execution` paradigm, the developer would use a scheduler as an interface to the execution resource, be it a single thread, a pool of threads, etc., and a sender rather than a `std::function` that describes their work. Here, the sender would begin using the scheduler, which denotes where to do the work, and the sender would be connected to a receiver which obtains the value(s) when the work is completed. 
+
+Let's compare these two approaches side-by-side, first using a `std::jthread`:
+
+```cpp
+int result{0};
+
+std::jthread thread{
+    [&result](){
+        // do some work and get the result:
+        result = 42;
+    }
+};
+
+// do some other work in the main thread
+
+thread.join();
+// result is now 42
+```
+
+Now, the `std::execution` implementation:
+
+```cpp
+// make a thread pool with one thread: this is our execution resource
+ex::static_thread_pool tp{1};
+
+// get a handle to the thread pool's scheduler
+ex::scheduler auto sched{tp.get_scheduler()};
+
+// define our sender which describes our work:
+
+// begin our pipeline with the schedule algorithm which is a sender factory that returns a
+// sender on the given scheduler. this is where our work will be done
+ex::sender auto work = ex::schedule(sched) 
+// next, use the then algorithm which is a sender adapter that takes a sender (our
+// sender on the scheduler defined in the previous step) and appends a function to the
+// input sender. then may also return some values.
+| ex::then(
+    [](){
+        // do some work and get the result
+        return 42;
+    }
+);
+
+// do some work in the main thread
+
+// actually start the work now (wait.. this isn't async..?)
+auto [result] = ex::sync_wait(std::move(work));
+// result is 42
+
+```
 
 
-The most typical way to manage work across different execution resources, is for a developer to create and own something like a `std::jthread` and pass a `std::function` to the thread. In this example, there is no explicit scheduler used by the developer and the function defines the work. P2300R10 changes this paradigm. 
-
-Continuing with this example and adopting the `std::execution` paradigm, the developer would use a scheduler as an interface to the execution resource, be it a single thread, a pool of threads, etc., and a sender rather than a `std::function` that describes their work. Here, the sender would begin using the scheduler, which denotes where to do the work, and the sender would be connected to a receiver which obtains the value(s) when the work is completed. 
 
 
 # Appendix 
