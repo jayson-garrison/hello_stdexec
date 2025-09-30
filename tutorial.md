@@ -62,6 +62,8 @@ In C++23 the most straightforward way to manage work using different execution r
 
 If we adopt the `std::execution` paradigm, the developer would use a scheduler as an interface to the execution resource, be it a single thread, a pool of threads, etc., and a sender rather than a `std::function` that describes their work. Here, the sender would begin using the scheduler, which denotes where to do the work, and the sender would be connected to a receiver which obtains the value(s) when the work is completed. 
 
+### Your First `std::execution` Pipeline
+
 Let's compare these two approaches side-by-side, first using a `std::jthread`:
 
 ```cpp
@@ -79,6 +81,8 @@ std::jthread thread{
 thread.join();
 // result is now 42
 ```
+
+What is happening in this implementation is self-evident. What I will note, however obvious, is that the `jthread` begins execution immediately upon construction. Whenever the user invokes `join`, the thread is already forked and running.  
 
 Now, the `std::execution` implementation:
 
@@ -112,8 +116,17 @@ auto [result] = ex::sync_wait(std::move(work));
 
 ```
 
+The comments in the implementation are already detailed but I will summarize them here since this may be your first exposure to `std:execution` code--which I admit is confusing to read and understand at first. We begin by making a `static_thread_pool` with a singular thread which is our execution resource, it is what we will use to do our work. We can discuss the specifics of the `static_thread_pool` later. We then obtain its scheduler using `get_scheduler`. We can see that its return satisfies the `scheduler` concept. 
 
+Now that we have our execution resource and scheduler, we need to define our work as a sender. First we will define a variable and call it `work` and constrain it by the `sender` concept. Next, we will use `schedule` which is a sender factory that returns a simple sender which is executed on the provided scheduler. We pass in our `static_thread_pool` scheduler. This sender that we have so far which merely defines that our work will be done on the provided scheduler can be extended/composed via the `|` operator. This means that we can take a sender, use an algorithm and get a new sender using this operator. So we will use the `then` algorithm which takes an input sender and appends a function to it. The `then` algorithm guarantees that the provided function only executes after the input sender does. We will simply pass in a lambda that returns 42 for the sake of example. Now, work is a sender that uses the `static_thread_pool`'s scheduler to execute a lambda function that does our work and returns a value. 
 
+So we have `work` but it actually doesn't do anything yet. What..? This is because senders are lazy in principle and only execute when connected to a receiver. We defined a sender, which describes our work, but have not actually executed it. The sender describes completely _where_, _how_, and _what_ work to do, but we need to tell it to execute. We can think of senders as three-fold descriptions of work. We can see that this is very different than just a function which we used in our `jthread` to "describe" our work. 
+
+So we will actually execute our work using a sender consumer called `sync_wait`. This does exactly was its name implies: the current thread will block on its invocation until the input sender is complete--where completion is defined as a value, error, or stopped state. We will move our work into it, but we don't have to. If we wanted to reuse `work`, then we can pass it in by value and use it again later. Under the hood, our sender `work` is connected to a receiver implicitly, and we can obtain its result which is returned from `sync_wait`. This is where we get our value: 42. 
+
+We can see that by using `std::execution`, our defined work is not directly tied to the execution resource. The sender we made takes any scheduler satisfying the `scheduler` concept, be it a thread pool, run loop, inline scheduler, custom scheduler, etc. Our work is defined in a straightforward, composable way that can use functions too. Our work is lazy meaning that it only ever executes when we specifically want it to. 
+
+Among the major differences between the `std::execution` implementation and the `jthread` is the fact that our pipeline does not really run in the background, whereas the `jthread` does. This doesn't seem parallel at all because the lazy sender doesn't execute immediately but rather has to be told directly to execute using `sync_wait` all while blocking the main thread from getting any work done! This is where the lazy paradigm becomes apparent in `std::execution`. The cannonical way to do something similar to the `jthread` implementation, where we fork a thread immediately and pass it some work to wait on it later, is to define a sender, start it, and synchronously wait for it. The `jthread` interface is simple and convenient and the developer gets concurrency and/or parallelism out of the box, whereas in `std::execution` the developer must explicitly define this but has more control in return. This concept leveraged in `std::execution` is known as _structured concurrency_. If we wanted to truly detach a concurrent or parallel thread we would not use `sync_wait` but `start_detached`. We will discuss `start_detached` later, but know that it is a fire and forget interface, synchronization/notification with other processes are defined by the developer. 
 
 # Appendix 
 
